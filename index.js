@@ -9,7 +9,7 @@ import Yargs from "yargs";
 import process from "process";
 import fs from "fs";
 
-const numCPUs = cpus().length > 1 ? cpus().length - 1 : 1;
+const numCPUs = cpus().length > 1 ? cpus().length - 0 : 1;
 const argv = Yargs(process.argv.slice(2))
   .usage("Usage: $0 <command> [options]")
   .example(
@@ -33,6 +33,9 @@ const argv = Yargs(process.argv.slice(2))
   .describe("n", "number of wallets")
   .boolean("contract")
   .describe("contract", "contract address for contract deployment")
+  .alias("m", "mnemonic")
+  .boolean("m")
+  .describe("m", "generate mnemonic")
   .alias("l", "log")
   .boolean("l")
   .describe("l", "log output to file")
@@ -46,6 +49,7 @@ if (cluster.isMaster) {
     isChecksum: argv.checksum ? true : false,
     numWallets: argv.count ? argv.count : 1,
     isContract: argv.contract ? true : false,
+    isMnemonic: argv.mnemonic ? true : false,
     log: argv.log ? true : false,
     logFname: argv.log ? "VanityEth-log-" + Date.now() + ".txt" : "",
   };
@@ -69,12 +73,13 @@ if (cluster.isMaster) {
         "hh:mm:ss"
       );
     addps = 0;
-  }, 1000);
+  }, 10);
   for (let i = 0; i < numCPUs; i++) {
     const worker_env = {
       input: args.input,
       isChecksum: args.isChecksum,
       isContract: args.isContract,
+      isMnemonic: args.isMnemonic,
     };
     const proc = cluster.fork(worker_env);
     proc.on("message", function (message) {
@@ -92,28 +97,31 @@ if (cluster.isMaster) {
           args.numWallets;
         spinner.start();
       } else if (message.counter) {
-        addps++;
+        addps += message.counter;
       }
     });
   }
 } else {
   const worker_env = process.env;
-  while (true) {
-    if (process.send) {
+  setInterval(function() {
+    var res = VanityEth.getVanityWallet(
+      worker_env.input,
+      worker_env.isChecksum == "true",
+      worker_env.isContract == "true",
+	  worker_env.isMnemonic == "true",
+      10
+    );
+    if(res[1] > 0) {
       process.send({
-        account: VanityEth.getVanityWallet(
-          worker_env.input,
-          worker_env.isChecksum == "true",
-          worker_env.isContract == "true",
-          function () {
-            process.send({
-              counter: true,
-            });
-          }
-        ),
+        counter: res[1],
       });
     }
-  }
+    if(res[0]) {
+      process.send({
+        account: res[0],
+      });
+    }
+  }, 10);
 }
 process.stdin.resume();
 const cleanup = function (options, err) {
